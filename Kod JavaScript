@@ -1,0 +1,47 @@
+function doGet(e) {
+  Logger.log(JSON.stringify(e));  // pobranie danych
+  var result = 'Ok'; // assume success
+  if (e.parameter == 'undefined') { // sprawdzzenie czy dotarły
+    result = 'No Parameters';
+  }
+  else {
+    var sheet_id = '1YLUXp3dpkWPWITH5PFF5hu3HWcvyntPoj35P6G024Lw'; 		// ID arkusza
+    var sheet = SpreadsheetApp.openById(sheet_id).getActiveSheet();		// aktywacja arkusza
+    var newRow = sheet.getLastRow() + 1;
+    var rowData = [];
+    d = new Date(); // pobranie daty
+    rowData[0] = d; // wpisanie daty
+    rowData[1] = d.toLocaleTimeString(); // wpisanie godziny
+
+    for (var param in e.parameter) {
+      Logger.log('In for loop, param=' + param);
+      var value = stripQuotes(e.parameter[param]);
+      Logger.log(param + ':' + e.parameter[param]);
+      switch (param) {
+        case 'Imie': // Parametr 1 - Imie
+          rowData[2] = value; // wpisanie
+          result = 'Written on column A'; // potwierdzenie
+          break;
+        case 'Nazwisko': // Parametr 2 - Nazwisko
+          rowData[3] = value; // wpisanie
+          result += ' Written on column B';
+          break;
+        case 'Email': // Parametr 3 - Email
+          rowData[4] = value; // wpisanie
+          result += ' Written on column C'; // potwierdzenie
+          break;
+        default:
+          result = param; // w przypadku gdy błędne dane
+          result = "unsupported parameter"; // potwierdzenie
+      }
+    }
+    Logger.log(JSON.stringify(rowData));
+    var newRange = sheet.getRange(newRow, 1, 1, rowData.length); // Dodaj kolejne wiersze
+    newRange.setValues([rowData]);
+  }
+  return ContentService.createTextOutput(result); // wypisz wynik działąnia
+}
+function stripQuotes(value) {
+  return value.replace(/^["']|['"]$/g, ""); // oczyszczenie możliwych "śmieci" w przesłanych danych
+}
+
