@@ -1,0 +1,200 @@
+// Biblioteki
+#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include <MFRC522.h>
+#include <SPI.h>
+
+// Specyficzne piny
+#define SS_PIN D2
+#define RST_PIN D1
+#define LED D0
+
+// Pojemność karty
+byte Max_mem = 18;
+
+// Przygotoeanie kienta MERFC
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+// Konfiguracja WiFi i pałączenia z google.
+const char* ssid = "2.4G-Vectra-WiFi-655644";    //ssid
+const char* password = "*********";     //hasło
+const char* host = "script.google.com";       //adres hosta
+const int httpsPort = 443;              //port https
+const char* fingerprint = "46 B2 C3 44 9C 59 09 8B 01 B4";    //ślad arduino
+String GAS_ID = "AKfycbzwSI3N5a6c2626z7LbU3IDC7dEWRnKJvq0dRw1xo7YgFwbyUrYId1RmAPu1Pi08WthdA";   //adres bazy danych
+
+// Przygotowanie klienta WiFi
+WiFiClientSecure client;
+
+// Uruchomiene arduino
+void setup()
+{
+  // Uruchomienie monitora szeregowego do debugowania
+  Serial.begin(115200);
+  Serial.println();
+  pinMode(LED, OUTPUT);
+  
+  // Uruchomienie WiFi
+  client.setInsecure();
+  Serial.print("connecting to ");
+  Serial.println(ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+
+  //Uruchomienie MRFC
+  SPI.begin();
+  mfrc522.PCD_Init();
+  Serial.println(F("Read personal data on a MIFARE PICC:"));
+
+}
+
+// Główny program
+void loop()
+{
+  // Odczyt klucza
+  MFRC522::MIFARE_Key key;
+  for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+  byte block;
+  MFRC522::StatusCode status;
+
+  //Sprawdzenie statusu
+
+  // Zamknięcie pętli gdy nie ma skanowanej karty
+  if ( ! mfrc522.PICC_IsNewCardPresent()) {
+    return;
+  }
+
+  // Zamknięcie pętli gdy nie ma aktywnej karty
+  if ( ! mfrc522.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Gdy aktywna karta
+  Serial.println(F("**Card Detected:**"));
+  digitalWrite(LED, HIGH);
+
+  // Informacje o karcie
+  mfrc522.PICC_DumpDetailsToSerial(&(mfrc522.uid));
+
+  // Buffory na dane z karty
+  byte buffor1[Max_mem];
+  byte buffor2[Max_mem];
+  block = 4;
+  String imie, nazwisko, email;
+
+  // Pobranie danych - adres E - mail
+  status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, 4, &key, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("Authentication failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return;
+  }
+  status = mfrc522.MIFARE_Read(block, buffor1, &Max_mem);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("Reading failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return;
+  }
+
+  // Konwersja danych z karty jako typu byte na char
+  int i = 1;
+  while (((char)buffor1[i] >= 'A' && (char)buffor1[i] <= 'Z') || ((char)buffor1[i] >= 'a' && (char)buffor1[i] <= 'z') || (char)buffor1[i] == '@' || (char)buffor1[i] == '.')
+  {
+    email = email + (char)buffor1[i];
+    i++;
+  }
+  i = 0;
+  block = 1;
+  // Pobranie danych - Imie i Nazwisko
+  status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, 1, &key, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("Authentication failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return;
+  }
+  status = mfrc522.MIFARE_Read(block, buffor2, &Max_mem);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("Reading failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return;
+  }
+
+  // Konwersja na char
+  while (((char)buffor2[i] >= 'A' && (char)buffor2[i] <= 'Z') || ((char)buffor2[i] >= 'a' && (char)buffor2[i] <= 'z'))
+  {
+    imie = imie + (char)buffor2[i];
+    i++;
+  }
+  i++;
+  while (((char)buffor2[i] >= 'A' && (char)buffor2[i] <= 'Z') || ((char)buffor2[i] >= 'a' && (char)buffor2[i] <= 'z'))
+  {
+    nazwisko = nazwisko + (char)buffor2[i];
+    i++;
+  }
+  i = 0;
+
+  // Wypis do debugowania
+  Serial.println("=======================================");
+  Serial.println(email);
+  Serial.println(imie);
+  Serial.println(nazwisko);
+
+  // Koniec odczytu karty
+  Serial.println(F("\n**End Reading**\n"));
+
+  // Odstęp pomiędzy odczytami
+  delay(1000);
+  mfrc522.PICC_HaltA();
+  mfrc522.PCD_StopCrypto1();
+
+  // Wyślij dane do chmury
+  sendData(imie, nazwisko, email);
+  digitalWrite(LED, LOW);
+}
+
+// Wysyłanie do chmury
+void sendData(String imie, String nazwisko, String email)
+{
+  // Informacje do debugowania
+  Serial.print("connecting to ");
+  Serial.println(host);
+  
+  // Gdy brak połączenia
+  if (!client.connect(host, httpsPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  // weryfikacja połączenia
+  if (client.verify(fingerprint, host)) {
+    Serial.println("certificate matches");
+  } else {
+    Serial.println("certificate doesn't match");
+  }
+
+  // Przygotowanie danych do wysłania
+  String url = "/macros/s/" + GAS_ID + "/exec?Imie=" + imie + "&Nazwisko=" + nazwisko + "&Email=" + email;
+
+  // Przesył dancyh
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" + "Host: " + host + "\r\n" + "User-Agent: BuildFailureDetectorESP8266\r\n" + "Connection: close\r\n\r\n");
+
+  // Informacja zwrotna
+  Serial.println("request sent");
+  while (client.connected()) {
+    String line = client.readStringUntil('\n');
+    if (line == "\r") {
+      Serial.println("headers received");
+      break;
+    }
+  }
+  String line = client.readStringUntil('\n');
+  Serial.println("reply was:");
+  Serial.println(line);
+  Serial.println("closing connection");
+}
